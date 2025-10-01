@@ -45,26 +45,27 @@ export async function joinAndListen(channel: VoiceBasedChannel, message: OmitPar
             });
 
             // Filename uses username and human-readable timestamp
-            const pcmFilePath = `./recordings/${username}-${timestampStr}.pcm`;
+            const pathRoot = `./recordings/${username}-${timestampStr}`;
+            const pcmFilePath = `${pathRoot}.pcm`
             const pcmFile = fs.createWriteStream(pcmFilePath);
 
             const decoder = new prism.opus.Decoder({
                 frameSize: 960,
-                channels: 2,
+                channels: 1,
                 rate: 48000,
             });
 
             pipeline(opusStream, decoder, pcmFile, (err) => {
-                if (err) console.error("Error saving PCM:", err);
-                else console.log(`Saved PCM recording: ${pcmFilePath}`);
+                if (err) {
+                    console.error("Error saving PCM:", err);
+                } else {
+                    console.log(`Saved PCM recording: ${pcmFilePath}`);
+                    transcribeAudio(pathRoot);
+                }
             });
         } catch (err) {
             console.error("Failed to get username for userId:", userId, err);
         }
-    });
-
-    receiver.speaking.on("end", (userId: string) => {
-        console.log(`User ${userId} stopped speaking`);
     });
 }
 
@@ -115,11 +116,6 @@ client.on("messageCreate", (message) => {
         } else {
             message.reply("I'm not in a voice channel.");
         }
-    }
-
-    if (message.content === "!test") {
-        message.reply("Attempting STT...");
-        transcribeAudio();
     }
 });
 
