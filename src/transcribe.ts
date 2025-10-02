@@ -32,7 +32,7 @@ export async function transcribeAudio(audioPath: string, transcriptPath: string,
         .map((result: any) => result.alternatives[0].transcript)
         .join("\n");
 
-    console.log(`${username} said: ${transcription}`);
+    console.log(`${username}: ${transcription}`);
 
     // Save transcription
     const outputFilePath = path.join(transcriptPath, `${timestamp}.txt`);

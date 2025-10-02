@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import prism from "prism-media";
 import { transcribeAudio } from "./transcribe";
+import { aggregateData } from "./data";
 
 async function createDirectory(folderPath: string): Promise<void> {
     const dir = path.join(process.cwd(), folderPath);
@@ -13,13 +14,14 @@ async function createDirectory(folderPath: string): Promise<void> {
     console.log("Directory created:", dir);
 }
 
-async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGroupDMChannel<Message<boolean>>) {
-    const guild = message.guild;
-    const guildId = guild!.id;
+async function joinAndListen(channel: VoiceBasedChannel) {
+    const guild = channel.guild;
+    const guildId = guild.id;
+    const channelId = channel.id
 
     const connection = joinVoiceChannel({
-        channelId: channel.id,
-        guildId: channel.guild.id,
+        channelId: channelId,
+        guildId: guildId,
         adapterCreator: channel.guild.voiceAdapterCreator,
         selfDeaf: false, // must be false to receive audio
     });
@@ -37,7 +39,7 @@ async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGro
     console.log("Receiver ready:", !!receiver);
 
     const chatStartTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const vcSessionPath = path.join("data", guildId, chatStartTimestamp);
+    const vcSessionPath = path.join("data", guildId, channelId, chatStartTimestamp);
     await createDirectory(vcSessionPath);
 
     const initializedUsers = new Set<string>(); // Prevents creating directories/starting listeners repeatedly
@@ -63,7 +65,7 @@ async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGro
                     createDirectory(userRecordingPath),
                     createDirectory(userTranscriptPath)
                 ]);
-                console.log(`✅Successfully created folders for ${username}!`)
+                console.log(`✅ Successfully created folders for ${username}!`)
 
                 initializedUsers.add(username);
             }
@@ -75,7 +77,7 @@ async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGro
             const userTranscriptPath = path.join(vcSessionPath, username, "transcripts");
 
             const opusStream = receiver.subscribe(userId, {
-                end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
+                end: { behavior: EndBehaviorType.AfterSilence, duration: 500 },
             });
 
             const pcmFilePath = path.join(userRecordingPath, `${timestampStr}.pcm`);
@@ -103,9 +105,17 @@ async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGro
             console.error("Failed to get username for userId:", userId, err);
         }
     });
+
+    // Return session info
+    return {
+        guildId,
+        channelId,
+        chatStartTimestamp
+    };
 }
 
 dotenv.config(); // loads .env file
+let activeSessions = new Map<string, { guildId: string, channelId: string, chatStartTimestamp: string }>();
 
 const client = new Client({
     intents: [
@@ -120,27 +130,32 @@ client.once("clientReady", () => {
   console.log(`✅ Logged in as ${client.user?.tag}!`);
 });
 
-client.on("messageCreate", (message) => {
+client.on("messageCreate", async (message) => {
     if (message.author.bot) return;
 
     if (message.content === "!join") {
         const user = message.member; // Non-null if in server (not DM)
 
-        if (!user || !("voice" in user)){
-            message.reply("❗ You must be in a server to use this command. ❗");
+        if (!user?.voice.channel){
+            message.reply("❌ You must be in a server to use this command.");
             return;
         }
 
-        const voiceChannel = user.voice.channel;
+        const voiceChannel = user.voice.channel!;
 
-        if (!voiceChannel){
-            message.reply("❗ You need to join a voice channel first! ❗")
+        if (activeSessions.has(message.guild!.id)){
+            message.reply("❌ I'm already in a voice chat! Please wait until I leave and transcribe the conversation.")
             return;
         }
 
         // Join voice chat
-        joinAndListen(voiceChannel, message);
-        message.reply(`Joined ${voiceChannel.name}!`)
+        const session = await joinAndListen(voiceChannel);
+        if (session) {
+            activeSessions.set(message.guild!.id, session);
+            message.reply(`Joined ${voiceChannel.name}!`);
+        } else {
+            message.reply("Failed to join the voice channel.");
+        }
     }
 
     if (message.content === "!leave") {
@@ -148,7 +163,15 @@ client.on("messageCreate", (message) => {
 
         if (connection) {
             connection.destroy();
-            message.reply("Left the voice channel!");
+            message.reply("Left the voice channel! Processing results...");
+
+            const session = activeSessions.get(message.guild!.id);
+            if (session){
+                await aggregateData(session);
+                activeSessions.delete(message.guild!.id);
+                message.reply("✅ Transcript processing complete!")
+            }
+
         } else {
             message.reply("I'm not in a voice channel.");
         }
