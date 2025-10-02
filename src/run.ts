@@ -3,15 +3,25 @@ import { getVoiceConnection, joinVoiceChannel, EndBehaviorType, entersState, Voi
 import dotenv from "dotenv";
 import { pipeline } from "stream";
 import fs from "fs";
+import path from "path";
 import prism from "prism-media";
 import { transcribeAudio } from "./transcribe";
 
-export async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGroupDMChannel<Message<boolean>>) {
+async function createDirectory(folderPath: string): Promise<void> {
+    const dir = path.join(process.cwd(), folderPath);
+    await fs.promises.mkdir(dir, { recursive: true });
+    console.log("Directory created:", dir);
+}
+
+async function joinAndListen(channel: VoiceBasedChannel, message: OmitPartialGroupDMChannel<Message<boolean>>) {
+    const guild = message.guild;
+    const guildId = guild!.id;
+
     const connection = joinVoiceChannel({
         channelId: channel.id,
         guildId: channel.guild.id,
         adapterCreator: channel.guild.voiceAdapterCreator,
-        selfDeaf: false, // important: must be false to receive audio
+        selfDeaf: false, // must be false to receive audio
     });
 
     try {
@@ -26,27 +36,49 @@ export async function joinAndListen(channel: VoiceBasedChannel, message: OmitPar
     const receiver = connection.receiver; // VoiceReceiver
     console.log("Receiver ready:", !!receiver);
 
-    // when someone starts speaking
+    const chatStartTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const vcSessionPath = path.join("data", guildId, chatStartTimestamp);
+    await createDirectory(vcSessionPath);
+
+    const initializedUsers = new Set<string>(); // Prevents creating directories/starting listeners repeatedly
+    const speakingUsers = new Set<string>();
+
     receiver.speaking.on("start", async (userId) => {
         try {
-            // Get the guild member to access their username
-            const member = await message.guild!.members.fetch(userId);
+            const member = await guild!.members.fetch(userId);
             const username = member.user.username;
 
-            // Create a readable timestamp
-            const timestamp = new Date();
-            const timestampStr = timestamp.toISOString().replace(/[:.]/g, "-"); 
-            // replace colon and dot for filesystem-safe filenames
+            if (speakingUsers.has(userId)) {
+                return;
+            }
+            speakingUsers.add(userId);
 
-            console.log(`User ${username} started speaking at ${timestamp.toLocaleString()}`);
+            if (!initializedUsers.has(username)) {
+                const userPath = path.join(vcSessionPath, username);
+                const userRecordingPath = path.join(userPath, "recordings");
+                const userTranscriptPath = path.join(userPath, "transcripts");
+
+                console.log(`Attempting to create folders for ${username}...`)
+                await Promise.all([
+                    createDirectory(userRecordingPath),
+                    createDirectory(userTranscriptPath)
+                ]);
+                console.log(`✅Successfully created folders for ${username}!`)
+
+                initializedUsers.add(username);
+            }
+
+            const timestamp = new Date();
+            const timestampStr = timestamp.toISOString().replace(/[:.]/g, "-");
+
+            const userRecordingPath = path.join(vcSessionPath, username, "recordings");
+            const userTranscriptPath = path.join(vcSessionPath, username, "transcripts");
 
             const opusStream = receiver.subscribe(userId, {
                 end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
             });
 
-            // Filename uses username and human-readable timestamp
-            const pathRoot = `./recordings/${username}-${timestampStr}`;
-            const pcmFilePath = `${pathRoot}.pcm`
+            const pcmFilePath = path.join(userRecordingPath, `${timestampStr}.pcm`);
             const pcmFile = fs.createWriteStream(pcmFilePath);
 
             const decoder = new prism.opus.Decoder({
@@ -56,13 +88,17 @@ export async function joinAndListen(channel: VoiceBasedChannel, message: OmitPar
             });
 
             pipeline(opusStream, decoder, pcmFile, (err) => {
+                speakingUsers.delete(userId);
+                opusStream.destroy();
+                decoder.destroy();
                 if (err) {
                     console.error("Error saving PCM:", err);
                 } else {
-                    console.log(`Saved PCM recording: ${pcmFilePath}`);
-                    transcribeAudio(pathRoot);
+                    //console.log(`Saved PCM recording: ${pcmFilePath}`);
+                    transcribeAudio(pcmFilePath, userTranscriptPath, timestampStr, username);
                 }
             });
+
         } catch (err) {
             console.error("Failed to get username for userId:", userId, err);
         }
