@@ -38,8 +38,14 @@ async function buildConversation(json: { guildId: string, channelId: string, con
         }
     }
 
+    function parseDate(date: string){
+        return new Date(date.replace(/T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/, 'T$1:$2:$3.$4Z'));
+    }
+
     // sort by timestamp
-    conversation.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    conversation.sort(
+        (a, b) => parseDate(a.start).getTime() - parseDate(b.start).getTime()
+    );
 
     // Set "conversation" to initialized JSON
     json.conversation = conversation;
@@ -56,4 +62,3 @@ export async function aggregateData(session: { guildId: string, channelId: strin
 
     await buildConversation(json, conversationPath);
 }
-

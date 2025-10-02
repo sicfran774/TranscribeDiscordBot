@@ -14,6 +14,8 @@ async function createDirectory(folderPath: string): Promise<void> {
     console.log("Directory created:", dir);
 }
 
+let startShutdown = false;
+
 async function joinAndListen(channel: VoiceBasedChannel) {
     const guild = channel.guild;
     const guildId = guild.id;
@@ -89,7 +91,7 @@ async function joinAndListen(channel: VoiceBasedChannel) {
                 rate: 48000,
             });
 
-            pipeline(opusStream, decoder, pcmFile, (err) => {
+            pipeline(opusStream, decoder, pcmFile, async (err) => {
                 speakingUsers.delete(userId);
                 opusStream.destroy();
                 decoder.destroy();
@@ -97,9 +99,15 @@ async function joinAndListen(channel: VoiceBasedChannel) {
                     console.error("Error saving PCM:", err);
                 } else {
                     //console.log(`Saved PCM recording: ${pcmFilePath}`);
-                    transcribeAudio(pcmFilePath, userTranscriptPath, timestampStr, username);
+                    await transcribeAudio(pcmFilePath, userTranscriptPath, timestampStr, username);
                 }
             });
+
+            pcmFile.on("finish", () => {
+                if(startShutdown){
+                    connection.destroy();
+                }
+            })
 
         } catch (err) {
             console.error("Failed to get username for userId:", userId, err);
@@ -149,6 +157,7 @@ client.on("messageCreate", async (message) => {
         }
 
         // Join voice chat
+        startShutdown = false;
         const session = await joinAndListen(voiceChannel);
         if (session) {
             activeSessions.set(message.guild!.id, session);
@@ -162,7 +171,7 @@ client.on("messageCreate", async (message) => {
         const connection = getVoiceConnection(message.guild!.id);
 
         if (connection) {
-            connection.destroy();
+            startShutdown = true;
             message.reply("Left the voice channel! Processing results...");
 
             const session = activeSessions.get(message.guild!.id);
