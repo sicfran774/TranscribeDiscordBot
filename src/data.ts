@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 
 function initializeJSON(serverId: string, channelId: string, conversationStart: string){
-    const initialData = {
+    const initialData: Conversation = {
         "guildId": serverId,
         "channelId": channelId,
         "conversationStart": conversationStart,
@@ -11,8 +11,15 @@ function initializeJSON(serverId: string, channelId: string, conversationStart: 
     return initialData;
 }
 
+export type Conversation = { 
+    guildId: string, 
+    channelId: string, 
+    conversationStart: string, 
+    conversation: Spoken[] 
+}
+
 // structure for each point in conversation
-type Spoken = {
+export type Spoken = {
     username: string;
     start: string;
     words: string;

@@ -7,6 +7,7 @@ import path from "path";
 import prism from "prism-media";
 import { transcribeAudio } from "./transcribe";
 import { aggregateData } from "./data";
+import { wordMessage } from "./analysis";
 
 async function createDirectory(folderPath: string): Promise<void> {
     const dir = path.join(process.cwd(), folderPath);
@@ -179,6 +180,8 @@ client.on("messageCreate", async (message) => {
                 await aggregateData(session);
                 activeSessions.delete(message.guild!.id);
                 message.reply("✅ Transcript processing complete!")
+                const wordCountMessage = await wordMessage(session);
+                message.reply(wordCountMessage)
             }
 
         } else {

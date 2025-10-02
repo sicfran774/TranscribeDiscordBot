@@ -34,6 +34,10 @@ export async function transcribeAudio(audioPath: string, transcriptPath: string,
 
     console.log(`${username}: ${transcription}`);
 
+    if (transcription.trim().length === 0){
+        return;
+    }
+
     // Save transcription
     const outputFilePath = path.join(transcriptPath, `${timestamp}.txt`);
     fs.writeFileSync(outputFilePath, transcription, { encoding: "utf8" });
