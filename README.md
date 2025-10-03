@@ -1,6 +1,4 @@
 # To-do
-- Fix special characters in usernames corrupting files
-- Fix empty transcription being written to file
 - Duration of transcription
 - Analysis:
     - Volume/pitch

@@ -59,7 +59,7 @@ async function joinAndListen(channel: VoiceBasedChannel) {
             speakingUsers.add(userId);
 
             if (!initializedUsers.has(username)) {
-                const userPath = path.join(vcSessionPath, username);
+                const userPath = path.join(vcSessionPath, username.replace(/[. ]+$/, ""));
                 const userRecordingPath = path.join(userPath, "recordings");
                 const userTranscriptPath = path.join(userPath, "transcripts");
 
