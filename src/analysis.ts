@@ -2,38 +2,105 @@ import fs from "fs";
 import path from "path";
 import { Conversation } from "./data";
 
-function countWords(guildId: string, channelId: string, chatStartTimestamp: string){
+function setupConversationRead(guildId: string, channelId: string, chatStartTimestamp: string){
     const conversationPath = path.join(process.cwd(), "data", guildId, channelId, chatStartTimestamp, "conversation.json");
 
     const conversationRaw = fs.readFileSync(conversationPath, 'utf-8');
     const conversationData: Conversation = JSON.parse(conversationRaw);
-    const conversation = conversationData.conversation;
+    return conversationData.conversation;
+}
 
-    const wordCounts = new Map<string, number>();
+function countWords(guildId: string, channelId: string, chatStartTimestamp: string) {
+    const conversation = setupConversationRead(guildId, channelId, chatStartTimestamp);
 
-    for (const message of conversation){
-        const words = message.words.split(/\s+/)
+    const userCounts = new Map<string, Map<string, number>>();
+    const totalCounts = new Map<string, number>();
 
-        for (let word of words){
+    for (const message of conversation) {
+        const username = message.username;
+        const words = message.words.split(/\s+/);
+
+        if (!userCounts.has(username)) {
+            userCounts.set(username, new Map<string, number>());
+        }
+
+        const wordMap = userCounts.get(username)!;
+
+        for (let word of words) {
             word = word.toLowerCase();
-            if(!word) continue;
+            if (!word) continue;
 
-            wordCounts.set(word, (wordCounts.get(word) || 0) + 1);
+            // per-user
+            wordMap.set(word, (wordMap.get(word) || 0) + 1);
+            // total
+            totalCounts.set(word, (totalCounts.get(word) || 0) + 1);
         }
     }
 
-    const sortedWordCounts = Array.from(wordCounts.entries())
+    // Build per-user sorted arrays
+    const wordsPerUser = [];
+    for (const [username, wordMap] of userCounts.entries()) {
+        const words: { word: string; count: number }[] = [];
+        for (const [word, count] of wordMap.entries()) {
+            words.push({ word, count });
+        }
+        const sortedWordCounts = words.sort((a, b) => b.count - a.count);
+        wordsPerUser.push({ username, words: sortedWordCounts });
+    }
+
+    // Build global sorted array
+    const sortedTotalCounts = Array.from(totalCounts.entries())
         .map(([word, count]) => ({ word, count }))
         .sort((a, b) => b.count - a.count);
 
-    return sortedWordCounts;
+    return {
+        total: sortedTotalCounts,
+        perUser: wordsPerUser,
+    };
 }
 
+
 export async function wordMessage(session: { guildId: string, channelId: string, chatStartTimestamp: string }){
+    const messages: string[] = [];
+
+    // total top words
     const wordCounts = countWords(session.guildId, session.channelId, session.chatStartTimestamp);
     
-    const firstTenWords = wordCounts.slice(0, 10);
-    const beautify = firstTenWords.map((word) => `${word.word}: ${word.count} times`)
-    const finalMessage = beautify.join("\n");
-    return finalMessage;
+    const firstTenWords = wordCounts.total.slice(0, 10);
+    const topWordsStr = firstTenWords.map((word, index) => ` ${word.word} (${word.count} times)`);
+    const topWordsMessage = "**Top 10 words said in this conversation**\n" +
+                            topWordsStr + "\n\n";
+
+    messages.push(topWordsMessage);
+
+    // top words per user
+    const topWordsPerUser: { username: string, topWords: { word: string, count: number }[] }[] = [];
+    
+
+    for (const user of wordCounts.perUser){
+        const username = user.username;
+        const topWords = user.words.slice(0, 10);
+
+        topWordsPerUser.push({
+            username,
+            topWords
+        })
+    }
+
+    messages.push("**Top 10 words said each person said**\n")
+
+
+    for (const user of topWordsPerUser) {
+        messages.push(`__${user.username}__\n`);
+
+        const topWordsPerUserStr: string[] = [];
+
+        user.topWords.forEach((word, index) => {
+            topWordsPerUserStr.push(`${word.word} (${word.count} ${(word.count > 1) ? "times" : "time"})`);
+        });
+
+        messages.push(topWordsPerUserStr.join(", "));
+    }
+
+    return messages;
 }

@@ -1,0 +1,11 @@
+{
+    "flagged_words": [
+        ["japan"],
+        ["your ass"],
+        ["6 7", "six seven", "six seventy", "sixty seventy", "sixty seven"],
+        ["i'm so full", "i am so full"]
+    ],
+    "first_mention_words": [
+        ["japan"]
+    ]
+}

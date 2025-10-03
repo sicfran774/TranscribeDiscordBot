@@ -180,8 +180,15 @@ client.on("messageCreate", async (message) => {
                 await aggregateData(session);
                 activeSessions.delete(message.guild!.id);
                 message.reply("✅ Transcript processing complete!")
-                const wordCountMessage = await wordMessage(session);
-                message.reply(wordCountMessage)
+                const messageStrs = await wordMessage(session);
+
+                if (messageStrs) {
+                    for (const s of messageStrs){
+                        message.channel.send(s);
+                    }
+                } else {
+                    message.reply("😢 Error sending word analysis. Sorry.")
+                }
             }
 
         } else {
@@ -191,3 +198,4 @@ client.on("messageCreate", async (message) => {
 });
 
 client.login(process.env.DISCORD_TOKEN);
+// ffmpeg -f s16le -ar 48k -ac 1 -i .pcm .wav
