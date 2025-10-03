@@ -41,6 +41,10 @@ async function buildConversation(json: { guildId: string, channelId: string, con
             const start = path.basename(file, ".txt"); // Strips .txt and gets only timestamp
             const words = fs.readFileSync(path.join(transcriptsPath, file), "utf-8").trim(); // Words inside of file
 
+            if (words.trim().length === 0){
+                continue;
+            }
+
             conversation.push({ username, start, words });
         }
     }

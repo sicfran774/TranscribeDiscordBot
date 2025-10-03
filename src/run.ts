@@ -195,6 +195,43 @@ client.on("messageCreate", async (message) => {
             message.reply("I'm not in a voice channel.");
         }
     }
+
+    if (message.content.startsWith("!process")){
+        const args = message.content.trim().split(" ").slice(1);
+        
+        if(args.length > 1){
+            const guildId = message.guild!.id;
+            if (!guildId) {
+                message.reply("❌ You must be in a server to use this command.");
+            }
+            try{
+                const session = {
+                    guildId: guildId,
+                    channelId: args[0],
+                    chatStartTimestamp: args[1]
+                }
+
+                console.log(session);
+
+                await aggregateData(session);
+
+                const messageStrs = await wordMessage(session);
+
+                if (messageStrs) {
+                    for (const s of messageStrs){
+                        message.channel.send(s);
+                    }
+                } else {
+                    message.reply("😢 Error sending word analysis. Sorry.")
+                }
+            } catch (e) {
+                console.log(e);
+                message.reply("Invalid conversation! Whoops.");
+            }
+        } else {
+            message.reply("Please specify the channel ID and date of conversation.\n!process [channel ID] [conversation date]");
+        }
+    }
 });
 
 client.login(process.env.DISCORD_TOKEN);

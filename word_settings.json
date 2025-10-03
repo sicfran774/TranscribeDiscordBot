@@ -7,5 +7,10 @@
     ],
     "first_mention_words": [
         ["japan"]
+    ],
+    "common_words":[
+        ["i"],
+        ["the"],
+        [""]
     ]
 }
