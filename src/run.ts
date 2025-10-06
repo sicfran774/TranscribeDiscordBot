@@ -1,11 +1,11 @@
-import { Client, GatewayIntentBits, Message, OmitPartialGroupDMChannel, VoiceBasedChannel } from "discord.js";
+import { Client, GatewayIntentBits, VoiceBasedChannel } from "discord.js";
 import { getVoiceConnection, joinVoiceChannel, EndBehaviorType, entersState, VoiceConnectionStatus } from "@discordjs/voice";
 import dotenv from "dotenv";
 import { pipeline } from "stream";
 import fs from "fs";
 import path from "path";
 import prism from "prism-media";
-import { transcribeAudio } from "./transcribe";
+import { transcribeAudio } from "./transcribe_google";
 import { aggregateData } from "./data";
 import { wordMessage } from "./analysis";
 
@@ -14,8 +14,6 @@ async function createDirectory(folderPath: string): Promise<void> {
     await fs.promises.mkdir(dir, { recursive: true });
     console.log("Directory created:", dir);
 }
-
-let startShutdown = false;
 
 async function joinAndListen(channel: VoiceBasedChannel) {
     const guild = channel.guild;
@@ -59,7 +57,7 @@ async function joinAndListen(channel: VoiceBasedChannel) {
             speakingUsers.add(userId);
 
             if (!initializedUsers.has(username)) {
-                const userPath = path.join(vcSessionPath, username.replace(/[. ]+$/, ""));
+                const userPath = path.join(vcSessionPath, username);
                 const userRecordingPath = path.join(userPath, "recordings");
                 const userTranscriptPath = path.join(userPath, "transcripts");
 
@@ -80,7 +78,7 @@ async function joinAndListen(channel: VoiceBasedChannel) {
             const userTranscriptPath = path.join(vcSessionPath, username, "transcripts");
 
             const opusStream = receiver.subscribe(userId, {
-                end: { behavior: EndBehaviorType.AfterSilence, duration: 500 },
+                end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
             });
 
             const pcmFilePath = path.join(userRecordingPath, `${timestampStr}.pcm`);
@@ -98,17 +96,27 @@ async function joinAndListen(channel: VoiceBasedChannel) {
                 decoder.destroy();
                 if (err) {
                     console.error("Error saving PCM:", err);
+                    return;
                 } else {
                     //console.log(`Saved PCM recording: ${pcmFilePath}`);
                     await transcribeAudio(pcmFilePath, userTranscriptPath, timestampStr, username);
                 }
             });
 
-            pcmFile.on("finish", () => {
-                if(startShutdown){
+            pcmFile.on("finish", async () => {
+                //console.log(`✅ Finished writing PCM: ${pcmFile.path}`);
+                if (!activeSessions.has(channel.guild.id) || activeSessions.get(channel.guild.id)?.startShutdown) {
                     connection.destroy();
                 }
-            })
+            });
+
+            pcmFile.on("error", (err) => {
+                console.error(`❌ PCM file write error:`, err);
+            });
+
+            pcmFile.on("close", () => {
+                //console.log(`🔒 PCM file closed: ${pcmFile.path}`);
+            });
 
         } catch (err) {
             console.error("Failed to get username for userId:", userId, err);
@@ -123,8 +131,12 @@ async function joinAndListen(channel: VoiceBasedChannel) {
     };
 }
 
-dotenv.config(); // loads .env file
-let activeSessions = new Map<string, { guildId: string, channelId: string, chatStartTimestamp: string }>();
+let activeSessions = new Map<string, { 
+        guildId: string, 
+        channelId: string, 
+        chatStartTimestamp: string,
+        startShutdown: boolean
+    }>();
 
 const client = new Client({
     intents: [
@@ -158,10 +170,17 @@ client.on("messageCreate", async (message) => {
         }
 
         // Join voice chat
-        startShutdown = false;
         const session = await joinAndListen(voiceChannel);
+
         if (session) {
-            activeSessions.set(message.guild!.id, session);
+            const activeSession = {
+                guildId: session.guildId,
+                channelId: session.channelId,
+                chatStartTimestamp: session.chatStartTimestamp,
+                startShutdown: false
+            }
+
+            activeSessions.set(message.guild!.id, activeSession);
             message.reply(`Joined ${voiceChannel.name}!`);
         } else {
             message.reply("Failed to join the voice channel.");
@@ -172,11 +191,11 @@ client.on("messageCreate", async (message) => {
         const connection = getVoiceConnection(message.guild!.id);
 
         if (connection) {
-            startShutdown = true;
             message.reply("Left the voice channel! Processing results...");
 
             const session = activeSessions.get(message.guild!.id);
             if (session){
+                session.startShutdown = true;
                 await aggregateData(session);
                 activeSessions.delete(message.guild!.id);
                 message.reply("✅ Transcript processing complete!")
@@ -234,5 +253,6 @@ client.on("messageCreate", async (message) => {
     }
 });
 
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 client.login(process.env.DISCORD_TOKEN);
 // ffmpeg -f s16le -ar 48k -ac 1 -i .pcm .wav

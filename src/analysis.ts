@@ -27,8 +27,10 @@ function countWords(guildId: string, channelId: string, chatStartTimestamp: stri
         const wordMap = userCounts.get(username)!;
 
         for (let word of words) {
-            word = word.toLowerCase();
-            if (!word) continue;
+            // Normalize: lowercase and remove punctuation
+            const cleanWord = word.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?"“”]/g, "");
+
+            if (!cleanWord) continue; // skip if it's now empty
 
             // per-user
             wordMap.set(word, (wordMap.get(word) || 0) + 1);
@@ -67,7 +69,7 @@ export async function wordMessage(session: { guildId: string, channelId: string,
     const wordCounts = countWords(session.guildId, session.channelId, session.chatStartTimestamp);
     
     const firstTenWords = wordCounts.total.slice(0, 10);
-    const topWordsStr = firstTenWords.map((word, index) => ` ${word.word} (${word.count} times)`);
+    const topWordsStr = firstTenWords.map((word, index) => ` ${word.word} (${word.count}x)`);
     const topWordsMessage = "**Top 10 words said in this conversation**\n" +
                             topWordsStr + "\n\n";
 
@@ -96,7 +98,7 @@ export async function wordMessage(session: { guildId: string, channelId: string,
         const topWordsPerUserStr: string[] = [];
 
         user.topWords.forEach((word, index) => {
-            topWordsPerUserStr.push(`${word.word} (${word.count} ${(word.count > 1) ? "times" : "time"})`);
+            topWordsPerUserStr.push(`${word.word} (${word.count}x)`);
         });
 
         messages.push(topWordsPerUserStr.join(", "));
