@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, VoiceBasedChannel } from "discord.js";
+import { Client, GatewayIntentBits, Message, VoiceBasedChannel, TextChannel, Collection } from "discord.js";
 import { getVoiceConnection, joinVoiceChannel, EndBehaviorType, entersState, VoiceConnectionStatus } from "@discordjs/voice";
 import dotenv from "dotenv";
 import { pipeline } from "stream";
@@ -8,6 +8,7 @@ import prism from "prism-media";
 import { transcribeAudio } from "./transcribe_google";
 import { aggregateData } from "./data";
 import { wordMessage } from "./analysis";
+import { analyzeWordleResults } from "./wordle_analysis";
 
 async function createDirectory(folderPath: string): Promise<void> {
     const dir = path.join(process.cwd(), folderPath);
@@ -251,7 +252,85 @@ client.on("messageCreate", async (message) => {
             message.reply("Please specify the channel ID and date of conversation.\n!process [channel ID] [conversation date]");
         }
     }
+
+    if (message.content === "!stats") {
+        // 1. Setup variables
+        const channel = message.channel as TextChannel;
+        const WORDLE_BOT_ID = '902041253456314398'; // Using ID is safer than name!
+        let allWordleMessages: Message[] = [];
+        let lastId: string | undefined;
+        let totalFetched = 0;
+
+        const statusMsg = await message.channel.send("Beginning to scan all Wordle results...");
+
+        try {
+            while (true) {
+                // 2. Fetch in batches of 100
+                const messages: Collection<string, Message> = await channel.messages.fetch({
+                    limit: 100,
+                    before: lastId,
+                    cache: false // Critical: Don't bloat your bot's memory
+                });
+
+                if (messages.size === 0) break;
+
+                // 3. Filter for Wordle and store
+                const wordleMsgs = messages.filter(m => m.author.username === "Wordle");
+                const resultsMsgs = wordleMsgs.filter(m => m.content.startsWith("**Your group is on a"));
+                allWordleMessages.push(...Array.from(resultsMsgs.values()));
+
+                // Update trackers
+                lastId = messages.lastKey();
+                totalFetched += messages.size;
+
+                // 4. (Optional) Progress update every 500 messages
+                if (totalFetched % 500 === 0) {
+                    await statusMsg.edit(`(${totalFetched} messages checked)`);
+                }
+
+                // Safety break: Discord's API only allows fetching 100 at a time.
+                // If we get fewer than 100, we've reached the very beginning of the channel.
+                if (messages.size < 100) break;
+            }
+
+            await statusMsg.edit(`Found **${allWordleMessages.length}** Wordle results in the last ${totalFetched} messages.\nSummarizing stats...`);
+            const result = await analyzeWordleResults(allWordleMessages.reverse());
+
+            const chunks = splitMessages(result);
+            for (const chunk of chunks) {
+                await message.channel.send(chunk);
+            }
+            
+            // You can now map through allWordleMessages to extract the scores
+        } catch (error) {
+            console.error(error);
+            message.channel.send("❌ Something went wrong while fetching history.");
+        }
+    }
 });
+
+function splitMessages(text: string, maxLength = 2000): string[] {
+    const messages: string[] = [];
+    let currentMessage = "";
+
+    // Split by lines so we don't break a row of stats in half
+    const lines = text.split("\n");
+
+    for (const line of lines) {
+        // +1 for the newline character we're adding back
+        if (currentMessage.length + line.length + 1 > maxLength) {
+            messages.push(currentMessage);
+            currentMessage = "";
+        }
+        currentMessage += line + "\n";
+    }
+
+    if (currentMessage.trim().length > 0) {
+        messages.push(currentMessage);
+    }
+
+    return messages;
+}
 
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 client.login(process.env.DISCORD_TOKEN);
